@@ -7,6 +7,10 @@ require 'colorize'
 class Board
   attr_accessor :squares
 
+  def at(position)
+    @squares[position[1]][position[0]]
+  end
+
   def initialize(should_setup = true)
     @squares = Array.new(8) { Array.new(8) { nil } }
     setup if should_setup
@@ -16,8 +20,8 @@ class Board
     (color == :black) ? :red : :black
   end
 
-  def set_square_at(pos, piece)
-    @squares[pos[1]][pos[0]] = piece
+  def set_at(position, piece)
+    @squares[position[1]][position[0]] = piece
   end
 
   def setup
@@ -51,8 +55,9 @@ class Board
   def run
     player_color = :black
     ltr_hash = {}
+    numchr_hash = {}
     ("a".."h").to_a.each_with_index { |ltr, idx| ltr_hash[ltr] = idx }
-    num_array = 8.downto(1).to_a
+    ("8".."1").to_a.each_with_index { |numchr, idx| numchr_hash[numchr] = idx }
     status = :play
     while status == :play
       puts self.to_s
@@ -60,19 +65,16 @@ class Board
         print "#{@board.player_color.to_s.capitalize}'s turn. "
         print "Enter move, e.g. b8 c6: "
         input = gets.chomp.split("")
-        move_from = [ltr_hash[input[0]], num_array.find_index(input[1].to_i)]
-        move_to = [ltr_hash[input[-2]], num_array.find_index(input[-1].to_i)]
-        piece = @board.get_piece_at(move_from)
+        move_from = [ ltr_hash[input[0]], numchr_hash[input[1]] ]
+        move_to = [ ltr_hash[input[-2]], numchr_hash[input[-1]] ]
+        piece = at(move_from)
         raise if piece.nil?
       rescue
         puts "There is no piece at #{move_from[0]},#{move_from[1]}"
         retry
       end
-      if piece.color == @board.player_color && piece.move(move_to)
-        mated = @board.check_for_checkmate? if @board.check_for_check?
-        if (game_won?)
-          status = :over
-        end
+      if piece.color == player_color && piece.move(move_to)
+        status = :over if (game_won?)
         player_color = opp_color(player_color)
       else
         puts "Cannot make that move."
@@ -100,29 +102,47 @@ class Piece
     @board = board
   end
 
-  ADJACENT_DIAGS = [
+  SLIDE_DIAGS = [
     [-1, -1],
     [ 1, -1],
     [-1,  1],
     [ 1,  1]
   ]
 
+  JUMP_DIAGS = [
+    [-2, -2],
+    [ 2, -2],
+    [-2,  2],
+    [ 2,  2]
+  ]
+
   def slide_moves
     cur_pos = self.position
-    slide_moves = ADJACENT_DIAGS.map { |delta| apply_delta(cur_pos, delta) }
-
+    slide_moves = SLIDE_DIAGS.map { |delta| apply_delta(cur_pos, delta) }
+    slide_moves.keep_if? { |pos| in_bounds?(pos) && unoccupied?(pos) }
     end
   end
 
+  def unoccupied?(position)
+    @board.at(position).nil?
+  end
+
+  def in_bounds?(position)
+    position.all? { |idx| idx.between?(0,7) }
+  end
+
   def jump_moves
+    []
   end
 
   def perform_slide
+
   end
 
   def perform_jump
     #perform_jump should remove the jumped pieces from the Board
     #an illegal slide/jump should raise InvalidMoveError
+    raise InvalidMoveError
   end
 
   def perform_moves!(move_sequence)
@@ -130,6 +150,7 @@ class Piece
     #should perform moves one by one
     #if a move fails, raise InvalidMoveError
     #don't bother to try to restore original Board state
+    raise InvalidMoveError
   end
 
   def valid_move_seq?
@@ -141,6 +162,7 @@ class Piece
   def perform_moves
     #check valid_move_seq?, then either call peform_moves!
     #  or raise InvalidMoveError
+    raise InvalidMoveError
   end
 
   def to_s
