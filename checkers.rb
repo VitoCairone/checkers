@@ -14,6 +14,14 @@ class Board
     @squares[position[1]][position[0]]
   end
 
+  def dup
+    board = Board.new(false)
+    board.squares = @squares.map do |row|
+      row.map { |piece| piece.nil? ? nil : piece.dup(board) }
+    end
+    board
+  end
+
   def initialize(should_setup = true)
     @squares = Array.new(8) { Array.new(8) { nil } }
     setup if should_setup
@@ -80,7 +88,7 @@ class Board
       end
       if piece.color == player_color
         begin
-          piece.perform_moves!(move_to)
+          piece.perform_moves!([move_to])
           player_color = Board.opp_color(player_color)
         rescue InvalidMoveError
           print "#{input[0..1].join("")} to #{input[-2..-1].join("")}"
@@ -96,7 +104,6 @@ class Board
   def inspect
   end
 
-
   def occupied?(position)
     !unoccupied?(position)
   end
@@ -105,7 +112,7 @@ class Board
     at(position).nil?
   end
 
-  def in_bounds?(position)
+  def self.in_bounds?(position)
     position.all? { |idx| idx.between?(0,7) }
   end
 
@@ -124,6 +131,12 @@ class Piece
 
   def double_delta(delta)
     delta.map { |i| 2 * i }
+  end
+
+  def dup(board)
+    duplicate = Piece.new(self.color, board, self.position)
+    duplicate.king = self.king
+    duplicate
   end
 
   def initialize(color, board, position)
@@ -163,7 +176,7 @@ class Piece
   def slide_moves
     cur_pos = self.position
     moves = SINGLE_DIAGS.map { |delta| apply_delta(cur_pos, delta) }
-    moves.select { |pos| @board.in_bounds?(pos) && @board.unoccupied?(pos) }
+    moves.select { |pos| Board.in_bounds?(pos) && @board.unoccupied?(pos) }
   end
 
   def jump_moves
@@ -171,7 +184,7 @@ class Piece
     SINGLE_DIAGS.each do |delta|
       jump_over = apply_delta(self.position, delta)
       landing = apply_delta(self.position, double_delta(delta))
-      next unless @board.in_bounds?(landing)
+      next unless Board.in_bounds?(landing)
       if enemy_piece?(jump_over) && @board.unoccupied?(landing)
         jump_moves << landing
       end
@@ -197,33 +210,46 @@ class Piece
     self.position = new_position
   end
 
-  def perform_moves!(move_sequence)
+  def perform_moves!(move_seq)
     #move_sequence is one slide, or one or more jumps
     #should perform moves one by one
     #if a move fails, raise InvalidMoveError
     #don't bother to try to restore original Board state
-    valid_moves = slide_moves + jump_moves
-    puts "valid slide moves are #{slide_moves}"
-    puts "valid jump moves are #{jump_moves}"
-    raise InvalidMoveError unless valid_moves.include?(move_sequence)
+    moves_remaining = move_seq.dup
+    until moves_remaining.empty?
+      next_position = moves_remaining.shift
+      possible_moves = slide_moves + jump_moves
+      raise InvalidMoveError unless possible_moves.include?(next_position)
 
-    if slide_moves.include?(move_sequence)
-      perform_slide(move_sequence)
-    else
-      perform_jump(move_sequence)
+      #Performing a move updates self.position
+      #which also alters the result
+      if slide_moves.include?(next_position)
+        perform_slide(next_position)
+      else
+        perform_jump(next_position)
+      end
     end
   end
 
-  def valid_move_seq?
+  def valid_move_seq?(move_seq)
     #should call perform_moves! on a duped Piece/Board
     #return true if no error is raised, else false
     #should not modify the original Board
+    test_board = @board.dup
+    equiv_piece = test_board.at(self.position)
+    begin
+      equiv_piece.perform_moves!(move_seq)
+    rescue
+      return false
+    end
+    true
   end
 
-  def perform_moves
+  def perform_moves(move_seq)
     #check valid_move_seq?, then either call peform_moves!
     #  or raise InvalidMoveError
-    raise InvalidMoveError
+    raise InvalidMoveError unless valid_move_seq?(move_seq)
+    perform_moves!(move_seq)
   end
 
   def to_s
