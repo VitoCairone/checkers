@@ -27,6 +27,14 @@ class Board
     setup if should_setup
   end
 
+  def player_can_jump?(color)
+    @squares.any? do |row|
+      row.any? do |piece|
+        !piece.nil? && (piece.color == color && !piece.jump_moves.empty?)
+      end
+    end
+  end
+
   def self.opp_color(color)
     (color == :black) ? :red : :black
   end
@@ -102,6 +110,7 @@ class Board
   end
 
   def inspect
+    "Board \##{self.object_id}"
   end
 
   def occupied?(position)
@@ -121,15 +130,15 @@ end
 class Piece
   attr_accessor :color, :king, :board, :position
 
-  def apply_delta(pos, delta)
+  def self.add_delta(pos, delta)
     [ pos[0] + delta[0], pos[1] + delta[1] ]
   end
 
-  def between_position(jumpoff, landing)
+  def self.between_position(jumpoff, landing)
     [ (jumpoff[0] + landing[0]) / 2, (jumpoff[1] + landing[1]) / 2]
   end
 
-  def double_delta(delta)
+  def self.double_delta(delta)
     delta.map { |i| 2 * i }
   end
 
@@ -146,19 +155,15 @@ class Piece
     @position = position
   end
 
-  SINGLE_DIAGS = [
-    [-1, -1],
-    [ 1, -1],
-    [-1,  1],
-    [ 1,  1]
-  ]
-
-  DOUBLE_DIAGS = [
-    [-2, -2],
-    [ 2, -2],
-    [-2,  2],
-    [ 2,  2]
-  ]
+  def single_diags
+    if self.king
+      [[1, 1], [1, -1], [-1, 1], [-1, -1]]
+    elsif self.color == :black
+      [[-1, 1], [1, 1]]
+    else
+      [[-1, -1], [1, -1]]
+    end
+  end
 
   def ally_piece?(position)
     @board.occupied?(position) && same_color?(position)
@@ -175,16 +180,18 @@ class Piece
 
   def slide_moves
     cur_pos = self.position
-    moves = SINGLE_DIAGS.map { |delta| apply_delta(cur_pos, delta) }
+    moves = single_diags.map { |delta| Piece.add_delta(cur_pos, delta) }
     moves.select { |pos| Board.in_bounds?(pos) && @board.unoccupied?(pos) }
   end
 
   def jump_moves
     jump_moves = []
-    SINGLE_DIAGS.each do |delta|
-      jump_over = apply_delta(self.position, delta)
-      landing = apply_delta(self.position, double_delta(delta))
+    single_diags.each do |delta|
+      jump_over = Piece.add_delta(self.position, delta)
+      landing = Piece.add_delta(self.position, Piece.double_delta(delta))
+
       next unless Board.in_bounds?(landing)
+
       if enemy_piece?(jump_over) && @board.unoccupied?(landing)
         jump_moves << landing
       end
@@ -216,18 +223,30 @@ class Piece
     #if a move fails, raise InvalidMoveError
     #don't bother to try to restore original Board state
     moves_remaining = move_seq.dup
-    until moves_remaining.empty?
-      next_position = moves_remaining.shift
-      possible_moves = slide_moves + jump_moves
-      raise InvalidMoveError unless possible_moves.include?(next_position)
+    moved_once = false
+    can_jump = @board.player_can_jump?(self.color)
 
-      #Performing a move updates self.position
-      #which also alters the result
-      if slide_moves.include?(next_position)
+    if can_jump
+      until moves_remaining.empty?
+        next_position = moves_remaining.shift
+
+        possible_moves = jump_moves
+        unless (possible_moves.empty?)
+          raise InvalidMoveError unless possible_moves.include?(next_position)
+          perform_jump(next_position)
+          moved_once = true
+          next
+        end
+
+        raise InvalidMoveError if (moved_once || can_jump)
+
+        possible_moves = slide_moves
+        raise InvalidMoveError unless possible_moves.include?(next_position)
         perform_slide(next_position)
-      else
-        perform_jump(next_position)
+        moved_once = true
       end
+    else
+      #slide stuff here
     end
   end
 
