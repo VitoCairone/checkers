@@ -4,6 +4,9 @@
 
 require 'colorize'
 
+class InvalidMoveError < StandardError
+end
+
 class Board
   attr_accessor :squares
 
@@ -30,9 +33,9 @@ class Board
     black_start += [[0,2],[2,2],[4,2],[6,2]]
     black_start.each { |pos| set_at(pos, Piece.new(:black, self, pos)) }
 
-    red_start = [[0,7],[2,7],[4,7],[6,7]]
-    red_start += [[1,6],[3,6],[5,6],[7,6]]
-    red_start += [[0,5],[2,5],[4,5],[6,5]]
+    red_start = [[1,7],[3,7],[5,7],[7,7]]
+    red_start += [[0,6],[2,6],[4,6],[6,6]]
+    red_start += [[1,5],[3,5],[5,5],[7,5]]
     red_start.each { |pos| set_at(pos, Piece.new(:red, self, pos)) }
   end
 
@@ -65,7 +68,7 @@ class Board
       puts self.to_s
       begin
         print "#{player_color.to_s.capitalize}'s turn. "
-        print "Enter move, e.g. b8 c6: "
+        print "Enter move, e.g. a6 b5: "
         input = gets.chomp.split("")
         move_from = [ ltr_hash[input[0]], numchr_hash[input[1]] ]
         move_to = [ ltr_hash[input[-2]], numchr_hash[input[-1]] ]
@@ -76,9 +79,14 @@ class Board
         retry
       end
       if piece.color == player_color
-        piece.perform_slide(move_to)
+        begin
+          piece.perform_moves!(move_to)
+          player_color = Board.opp_color(player_color)
+        rescue InvalidMoveError
+          print "#{input[0..1].join("")} to #{input[-2..-1].join("")}"
+          puts " is not a valid move."
+        end
         #status = :over if (game_won?)
-        player_color = Board.opp_color(player_color)
       else
         puts "Cannot move the enemy's pieces."
       end #end if piece.move
@@ -92,7 +100,7 @@ class Board
   def occupied?(position)
     !unoccupied?(position)
   end
-  
+
   def unoccupied?(position)
     at(position).nil?
   end
@@ -109,11 +117,15 @@ class Piece
   def apply_delta(pos, delta)
     [ pos[0] + delta[0], pos[1] + delta[1] ]
   end
-  
+
+  def between_position(jumpoff, landing)
+    [ (jumpoff[0] + landing[0]) / 2, (jumpoff[1] + landing[1]) / 2]
+  end
+
   def double_delta(delta)
     delta.map { |i| 2 * i }
   end
-  
+
   def initialize(color, board, position)
     @color = color
     @king = false
@@ -142,12 +154,12 @@ class Piece
   def enemy_piece?(position)
     @board.occupied?(position) && !same_color?(position)
   end
-  
+
   def same_color?(position)
     #expects a position which is in-bounds and occupied
     @board.at(position).color == self.color
   end
-  
+
   def slide_moves
     cur_pos = self.position
     moves = SINGLE_DIAGS.map { |delta| apply_delta(cur_pos, delta) }
@@ -161,29 +173,28 @@ class Piece
       landing = apply_delta(self.position, double_delta(delta))
       next unless @board.in_bounds?(landing)
       if enemy_piece?(jump_over) && @board.unoccupied?(landing)
-        jump_moves << [jump_over, landing]
+        jump_moves << landing
       end
     end
     jump_moves
   end
 
-  #execute_move is the 'innermost' utility function. All validity checks should
-  #be performed BEFORE calling execute_move.
-  def execute_move(new_position)
+  def perform_slide(new_position)
+    raise InvalidMoveError unless slide_moves.include?(new_position)
     @board.set_at(self.position, nil)
     @board.set_at(new_position, self)
     self.position = new_position
   end
 
-  def perform_slide(position)
-    raise InvalidMoveError unless slide_moves.include?(position)
-    execute_move(position)
-  end
-
-  def perform_jump
+  def perform_jump(new_position)
     #perform_jump should remove the jumped pieces from the Board
     #an illegal slide/jump should raise InvalidMoveError
-    raise InvalidMoveError
+    raise InvalidMoveError unless jump_moves.include?(new_position)
+    remove_from = between_position(self.position, new_position)
+    @board.set_at(self.position, nil)
+    @board.set_at(remove_from, nil)
+    @board.set_at(new_position, self)
+    self.position = new_position
   end
 
   def perform_moves!(move_sequence)
@@ -191,7 +202,16 @@ class Piece
     #should perform moves one by one
     #if a move fails, raise InvalidMoveError
     #don't bother to try to restore original Board state
-    raise InvalidMoveError
+    valid_moves = slide_moves + jump_moves
+    puts "valid slide moves are #{slide_moves}"
+    puts "valid jump moves are #{jump_moves}"
+    raise InvalidMoveError unless valid_moves.include?(move_sequence)
+
+    if slide_moves.include?(move_sequence)
+      perform_slide(move_sequence)
+    else
+      perform_jump(move_sequence)
+    end
   end
 
   def valid_move_seq?
