@@ -28,12 +28,12 @@ class Board
     black_start = [[0,0],[2,0],[4,0],[6,0]]
     black_start += [[1,1],[3,1],[5,1],[7,1]]
     black_start += [[0,2],[2,2],[4,2],[6,2]]
-    black_start.each { |pos| set_square_at(pos, Piece.new(:black, self, pos)) }
+    black_start.each { |pos| set_at(pos, Piece.new(:black, self, pos)) }
 
     red_start = [[0,7],[2,7],[4,7],[6,7]]
     red_start += [[1,6],[3,6],[5,6],[7,6]]
     red_start += [[0,5],[2,5],[4,5],[6,5]]
-    red_start.each { |pos| set_square_at(pos, Piece.new(:red, self, pos)) }
+    red_start.each { |pos| set_at(pos, Piece.new(:red, self, pos)) }
   end
 
   def to_s
@@ -57,12 +57,14 @@ class Board
     ltr_hash = {}
     numchr_hash = {}
     ("a".."h").to_a.each_with_index { |ltr, idx| ltr_hash[ltr] = idx }
-    ("8".."1").to_a.each_with_index { |numchr, idx| numchr_hash[numchr] = idx }
+    ("1".."8").to_a.reverse.each_with_index do |numchr, idx|
+      numchr_hash[numchr] = idx
+    end
     status = :play
     while status == :play
       puts self.to_s
       begin
-        print "#{@board.player_color.to_s.capitalize}'s turn. "
+        print "#{player_color.to_s.capitalize}'s turn. "
         print "Enter move, e.g. b8 c6: "
         input = gets.chomp.split("")
         move_from = [ ltr_hash[input[0]], numchr_hash[input[1]] ]
@@ -73,19 +75,31 @@ class Board
         puts "There is no piece at #{move_from[0]},#{move_from[1]}"
         retry
       end
-      if piece.color == player_color && piece.move(move_to)
-        status = :over if (game_won?)
-        player_color = opp_color(player_color)
+      if piece.color == player_color
+        piece.perform_slide(move_to)
+        #status = :over if (game_won?)
+        player_color = Board.opp_color(player_color)
       else
-        puts "Cannot make that move."
+        puts "Cannot move the enemy's pieces."
       end #end if piece.move
     end #end while loop
   end
 
   def inspect
-    "\n" + self.to_s
   end
 
+
+  def occupied?(position)
+    !unoccupied?(position)
+  end
+  
+  def unoccupied?(position)
+    at(position).nil?
+  end
+
+  def in_bounds?(position)
+    position.all? { |idx| idx.between?(0,7) }
+  end
 
 end
 
@@ -93,50 +107,77 @@ class Piece
   attr_accessor :color, :king, :board, :position
 
   def apply_delta(pos, delta)
-    [ pos[0] + delta[0], pos[1] + deltas[1] ]
+    [ pos[0] + delta[0], pos[1] + delta[1] ]
   end
-
+  
+  def double_delta(delta)
+    delta.map { |i| 2 * i }
+  end
+  
   def initialize(color, board, position)
     @color = color
     @king = false
     @board = board
+    @position = position
   end
 
-  SLIDE_DIAGS = [
+  SINGLE_DIAGS = [
     [-1, -1],
     [ 1, -1],
     [-1,  1],
     [ 1,  1]
   ]
 
-  JUMP_DIAGS = [
+  DOUBLE_DIAGS = [
     [-2, -2],
     [ 2, -2],
     [-2,  2],
     [ 2,  2]
   ]
 
+  def ally_piece?(position)
+    @board.occupied?(position) && same_color?(position)
+  end
+
+  def enemy_piece?(position)
+    @board.occupied?(position) && !same_color?(position)
+  end
+  
+  def same_color?(position)
+    #expects a position which is in-bounds and occupied
+    @board.at(position).color == self.color
+  end
+  
   def slide_moves
     cur_pos = self.position
-    slide_moves = SLIDE_DIAGS.map { |delta| apply_delta(cur_pos, delta) }
-    slide_moves.keep_if? { |pos| in_bounds?(pos) && unoccupied?(pos) }
-    end
-  end
-
-  def unoccupied?(position)
-    @board.at(position).nil?
-  end
-
-  def in_bounds?(position)
-    position.all? { |idx| idx.between?(0,7) }
+    moves = SINGLE_DIAGS.map { |delta| apply_delta(cur_pos, delta) }
+    moves.select { |pos| @board.in_bounds?(pos) && @board.unoccupied?(pos) }
   end
 
   def jump_moves
-    []
+    jump_moves = []
+    SINGLE_DIAGS.each do |delta|
+      jump_over = apply_delta(self.position, delta)
+      landing = apply_delta(self.position, double_delta(delta))
+      next unless @board.in_bounds?(landing)
+      if enemy_piece?(jump_over) && @board.unoccupied?(landing)
+        jump_moves << [jump_over, landing]
+      end
+    end
+    jump_moves
   end
 
-  def perform_slide
+  #execute_move is the 'innermost' utility function. All validity checks should
+  #be performed BEFORE calling execute_move.
+  def execute_move(new_position)
+    @board.set_at(self.position, nil)
+    @board.set_at(new_position, self)
+    self.position = new_position
+  end
 
+  def perform_slide(position)
+    raise InvalidMoveError unless slide_moves.include?(position)
+    execute_move(position)
   end
 
   def perform_jump
