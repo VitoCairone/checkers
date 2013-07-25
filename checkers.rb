@@ -3,6 +3,8 @@
 # Vito Cairone
 
 require 'colorize'
+require_relative 'piece.rb'
+require_relative 'player.rb'
 
 class InvalidMoveError < StandardError
 end
@@ -22,6 +24,22 @@ class Board
     board
   end
 
+  def get_move(player)
+    #Get a move and ensure it is valid
+    begin
+      print "#{player.color.capitalize}'s turn. "
+      move_from, move_to = player.pick_move
+      return [nil, nil] if move_from.nil? #indicates QUIT option
+
+      piece = at(move_from)
+      raise if piece.nil? || piece.color != player.color
+    rescue
+      puts "Cannot move from #{unparse_position(move_from)}"
+      retry
+    end
+    [piece, move_to]
+  end
+
   def self.in_bounds?(position)
     position.all? { |idx| idx.between?(0,7) }
   end
@@ -33,16 +51,6 @@ class Board
 
   def inspect
     "Board \##{self.object_id}"
-  end
-
-  def parse_input(input_str)
-    ltr_hash = {}
-    numchr_hash = {}
-    ("a".."h").to_a.each_with_index { |ltr, idx| ltr_hash[ltr] = idx }
-    ("1".."8").to_a.reverse.each_with_index do |numchr, idx|
-      numchr_hash[numchr] = idx
-    end
-    [ ltr_hash[input_str[0]], numchr_hash[input_str[1]] ]
   end
 
   def self.opp_color(color)
@@ -61,49 +69,35 @@ class Board
     end
   end
 
-  def run
-    player_color = :black
-    status = :play
-    puts "HOW TO PLAY:"
-    puts "Enter a move as a 'to' and 'from' position with a space between,"
-    puts "for example: c6 d7"
-    puts "To make a multiple-jump, include all destinations,"
-    puts "for example: h8 f6 h4 f2"
-    puts "Remember, if you have any jumps available, you must make a jump move!"
+  def run(player1 = nil, player2 = nil)
+    player1 = HumanPlayer.new(:black, self) if player1.nil?
+    player2 = ComputerPlayer.new(:red, self) if player2.nil?
 
-    while status == :play
-      puts self.to_s
+    raise RuntimeError if player1 == player2
+    raise RuntimeError if player1.color == player2.color
+
+    if player1.is_a?(HumanPlayer) || player2.is_a?(HumanPlayer)
+      HumanPlayer.print_instructions
+    end
+
+    cur_player = player1
+    self.show
+    while true
+      piece, move_to = get_move(cur_player)
+      return if piece.nil? #pass through QUIT option
+
       begin
-        print "#{player_color.to_s.capitalize}'s turn. "
-        print "Enter move: "
-        input = gets.chomp.split(" ")
-
-        return if ["quit","q","QUIT","Q","exit"].include?(input.first)
-
-        move_from = parse_input(input.shift)
-        move_to = input.map { |str| parse_input(str) }
-
-        piece = at(move_from)
-        raise if piece.nil?
-      rescue
-        puts "There is no piece at #{move_from[0]},#{move_from[1]}"
-        retry
-      end
-      if piece.color == player_color
-        begin
-          piece.perform_moves(move_to)
-          if won?(player_color)
-            puts "#{player_color.to_s.capitalize} wins!"
-            status = :over
-          end
-          player_color = Board.opp_color(player_color)
-        rescue InvalidMoveError
-          puts "Invalid move. Try again."
+        piece.perform_moves(move_to)
+        if won?(cur_player.color)
+          puts "#{cur_player.color.capitalize} wins!"
+          return
         end
-        #status = :over if (game_won?)
+        cur_player = (cur_player == player1 ? player2 : player1)
+      rescue InvalidMoveError
+        puts "Invalid move. Try again."
       else
-        puts "Cannot move the enemy's pieces."
-      end #end if piece.move
+        self.show
+      end
     end #end while loop
   end
 
@@ -157,156 +151,6 @@ class Board
     !@squares.any? do |row|
       row.any? { |piece| !piece.nil? && (piece.color == enemy_color) }
     end
-  end
-
-end
-
-class Piece
-  attr_accessor :color, :king, :board, :position
-
-  def ally_piece?(position)
-    @board.occupied?(position) && same_color?(position)
-  end
-
-  def self.add_delta(pos, delta)
-    [ pos[0] + delta[0], pos[1] + delta[1] ]
-  end
-
-  def self.between_position(jumpoff, landing)
-    [ (jumpoff[0] + landing[0]) / 2, (jumpoff[1] + landing[1]) / 2]
-  end
-
-  def self.double_delta(delta)
-    delta.map { |i| 2 * i }
-  end
-
-  def dup(board)
-    duplicate = Piece.new(self.color, board, self.position)
-    duplicate.king = self.king
-    duplicate
-  end
-
-  def enemy_piece?(position)
-    @board.occupied?(position) && !same_color?(position)
-  end
-
-  def initialize(color, board, position)
-    @color = color
-    @king = false
-    @board = board
-    @position = position
-  end
-
-  def jump_moves
-    jump_moves = []
-    single_diags.each do |delta|
-      jump_over = Piece.add_delta(self.position, delta)
-      landing = Piece.add_delta(self.position, Piece.double_delta(delta))
-
-      next unless Board.in_bounds?(landing)
-
-      if enemy_piece?(jump_over) && @board.unoccupied?(landing)
-        jump_moves << landing
-      end
-    end
-    jump_moves
-  end
-
-  def perform_jump(new_position)
-    #perform_jump should remove the jumped pieces from the Board
-    #an illegal slide/jump should raise InvalidMoveError
-    raise InvalidMoveError unless jump_moves.include?(new_position)
-    remove_from = Piece.between_position(self.position, new_position)
-    @board.set_at(self.position, nil)
-    @board.set_at(remove_from, nil)
-    @board.set_at(new_position, self)
-    self.position = new_position
-  end
-
-  def perform_moves(move_seq)
-    #check valid_move_seq?, then either call peform_moves!
-    #  or raise InvalidMoveError
-    raise InvalidMoveError unless valid_move_seq?(move_seq)
-    perform_moves!(move_seq)
-  end
-
-  def perform_moves!(move_seq)
-    #move_sequence is one slide, or one or more jumps
-    #should perform moves one by one
-    #if a move fails, raise InvalidMoveError
-    #don't bother to try to restore original Board state
-    if @board.player_can_jump?(self.color)
-
-      #jump stuff here
-      moves_remaining = move_seq.dup
-      until moves_remaining.empty?
-        next_position = moves_remaining.shift
-        raise InvalidMoveError unless jump_moves.include?(next_position)
-        perform_jump(next_position)
-      end
-      raise InvalidMoveError unless jump_moves.empty?
-
-    else
-
-      #slide stuff here
-      next_position = move_seq.first
-      raise InvalidMoveError unless slide_moves.include?(next_position)
-      perform_slide(next_position)
-
-    end
-
-    self.king = true if (reached_back_row && !self.king)
-  end
-
-  def perform_slide(new_position)
-    raise InvalidMoveError unless slide_moves.include?(new_position)
-    @board.set_at(self.position, nil)
-    @board.set_at(new_position, self)
-    self.position = new_position
-  end
-
-  def reached_back_row
-    self.position[1] == (self.color == :red ? 0 : 7)
-  end
-
-  def same_color?(position)
-    #expects a position which is in-bounds and occupied
-    @board.at(position).color == self.color
-  end
-
-  def single_diags
-    if self.king
-      [[1, 1], [1, -1], [-1, 1], [-1, -1]]
-    elsif self.color == :black
-      [[-1, 1], [1, 1]]
-    else
-      [[-1, -1], [1, -1]]
-    end
-  end
-
-  def slide_moves
-    cur_pos = self.position
-    moves = single_diags.map { |delta| Piece.add_delta(cur_pos, delta) }
-    moves.select { |pos| Board.in_bounds?(pos) && @board.unoccupied?(pos) }
-  end
-
-  #For UTF characters see http://www.csbruce.com/software/utf-8.html
-  def to_s
-    ((self.king) ? " ♚ " : " ◉ ").colorize(self.color)
-  end
-
-  def valid_move_seq?(move_seq)
-    #should call perform_moves! on a duped Piece/Board
-    #return true if no error is raised, else false
-    #should not modify the original Board
-    test_board = @board.dup
-    equiv_piece = test_board.at(self.position)
-    begin
-      equiv_piece.perform_moves!(move_seq)
-    rescue
-      return false
-    end
-    true
   end
 
 end
