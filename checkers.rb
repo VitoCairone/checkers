@@ -16,6 +16,10 @@ class Board
     @squares[position[1]][position[0]]
   end
 
+  def clear
+    @squares = Array.new(8) { Array.new(8) { nil } }
+  end
+
   def dup
     board = Board.new(false)
     board.squares = @squares.map do |row|
@@ -115,6 +119,7 @@ class Board
     red_start += [[0,6],[2,6],[4,6],[6,6]]
     red_start += [[1,5],[3,5],[5,5],[7,5]]
     red_start.each { |pos| set_at(pos, Piece.new(:red, self, pos)) }
+    nil
   end
 
   def show

@@ -2,7 +2,7 @@ class MustOverrideError < StandardError
 end
 
 class Player
-  attr_accessor :board, :color
+  attr_accessor :color, :board
 
   def initialize(color, board)
     self.color = color
