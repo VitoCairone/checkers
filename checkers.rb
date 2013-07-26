@@ -5,6 +5,7 @@
 require 'colorize'
 require_relative 'piece.rb'
 require_relative 'player.rb'
+require 'debugger'
 
 class InvalidMoveError < StandardError
 end
@@ -29,6 +30,7 @@ class Board
   end
 
   def get_move(player)
+    #debugger
     #Get a move and ensure it is valid
     begin
       print "#{player.color.capitalize}'s turn. "
@@ -93,6 +95,7 @@ class Board
       begin
         piece.perform_moves(move_to)
         if won?(cur_player.color)
+          self.show
           puts "#{cur_player.color.capitalize} wins!"
           return
         end
@@ -147,6 +150,9 @@ class Board
   end
 
   def unparse_position(position)
+    unless position.is_a?(Array) && position.count == 2
+      return "InvalidType:#{position.class}"
+    end
     i, j = position
     "#{("a".."h").to_a[i]}#{("1".."8").to_a.reverse[j]}"
   end
